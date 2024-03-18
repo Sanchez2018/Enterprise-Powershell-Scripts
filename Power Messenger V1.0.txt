@@ -1,0 +1,149 @@
+function Show-MainMenu {
+    Add-Type -AssemblyName System.Windows.Forms
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Power Messenger"
+    $form.Width = 420
+    $form.Height = 290
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = "FixedSingle"
+    $form.SizeGripStyle = "Hide"
+    $form.Topmost = $true
+
+    # GUI Icon Path
+    $iconPath = Join-Path $env:SystemRoot "system32\newdev.exe"
+    $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($iconPath)
+    $form.Icon = $icon
+
+    # Labels
+    $HostnameLabel = New-Object System.Windows.Forms.Label
+    $HostnameLabel.Text = "Hostname:"
+    $HostnameLabel.Top = 15; $HostnameLabel.Left = 25; $HostnameLabel.Width = 60;
+
+    $MessageLabel = New-Object System.Windows.Forms.Label
+    $MessageLabel.Text = "Message:"
+    $MessageLabel.Top = 80; $MessageLabel.Left = 25; $MessageLabel.Width = 60;
+
+    # TextBoxes
+    $HostNameTextBox = New-Object System.Windows.Forms.TextBox
+    $HostNameTextBox.Location = New-Object System.Drawing.Point(30, 40)
+    $HostNameTextBox.Size = New-Object System.Drawing.Size(260, 20)
+    $HostNameTextBox.Text = [System.Net.Dns]::GetHostName()  # Set default value to current workstation hostname / DELETE if not needed
+    $HostNameTextBox.Add_KeyDown({
+        if ($_.Control -and $_.KeyCode -eq 'A') {
+            $HostNameTextBox.SelectAll()
+        }
+    })
+
+    # Multi TextBox
+    $MessagetextBox = New-Object System.Windows.Forms.TextBox
+    $MessagetextBox.Location = New-Object System.Drawing.Point(30, 105)
+    $MessagetextBox.Size = New-Object System.Drawing.Size(260, 120)
+    $MessagetextBox.Multiline = $true
+    $MessagetextBox.AcceptsReturn
+    $MessagetextBox.ScrollBars = 'Both'
+    $MessagetextBox.MaxLength = 255  # Set maximum character length for alphabet, numerical, and special characters
+
+    # Allow Control+A to select all text
+    $MessagetextBox.Add_KeyDown({
+        if ($_.Control -and $_.KeyCode -eq 'A') {
+            $MessagetextBox.SelectAll()
+        }
+    })
+
+    # Character count label
+    $CharCountLabel = New-Object System.Windows.Forms.Label
+    $CharCountLabel.Text = "Characters: 0/255"
+    $CharCountLabel.Top = 210; $CharCountLabel.Left = 295; $CharCountLabel.Width = 100;
+
+    # Update character count on text change
+    $MessagetextBox.Add_TextChanged({
+        if ($MessagetextBox.Text.Length -gt 255) {
+            $MessagetextBox.Text = $MessagetextBox.Text.Substring(0, 255)
+            $MessagetextBox.SelectionStart = $MessagetextBox.Text.Length
+            $MessagetextBox.SelectionLength = 0
+        }
+
+        $charCount = $MessagetextBox.Text.Length
+        $CharCountLabel.Text = "Characters: $charCount/255"
+    })
+
+    # Prefill Button
+    $PrefillButton = New-Object System.Windows.Forms.Button
+    $PrefillButton.Location = New-Object System.Drawing.Point(300, 105)
+    $PrefillButton.Size = New-Object System.Drawing.Size(75, 23)
+    $PrefillButton.Text = 'Insert Fill'
+    $PrefillButton.Add_Click({
+
+    # Set your prefill button text here
+    $prefillText = @'
+>Remote Message<
+
+From:
+Subject:
+
+Please call:
+
+>This message only lasts 60 seconds<
+'@
+
+    $MessagetextBox.Text = $prefillText
+})
+
+
+    # Invoke Wmi Method Function
+    $elevatedScript = {
+        param($computerName, $message)
+    
+        # Remote Host Message Code
+        try {
+            $result = Invoke-WmiMethod -Path Win32_Process -Name Create -ArgumentList "msg * $message" -ComputerName $computerName
+            $resultInfo = $result.PSObject.Properties | ForEach-Object {
+                "$($_.Name): $($_.Value)"
+            }
+    
+            # Display result in a messagebox
+            [System.Windows.Forms.MessageBox]::Show("Message Sent!`n`n$resultInfo", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+        } catch {
+            # Display error in a messagebox
+            [System.Windows.Forms.MessageBox]::Show("Error invoking WMI method:`n`n$_", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        }
+    }
+    
+    # All Buttons
+    $SendButton = New-Object System.Windows.Forms.Button
+    $SendButton.Location = New-Object System.Drawing.Point(300, 38)
+    $SendButton.Size = New-Object System.Drawing.Size(75, 23)
+    $SendButton.Text = 'Send'
+    $SendButton.Add_Click({
+        try {
+            $computerName = $HostNameTextBox.Text
+            $message = $MessagetextBox.Text
+    
+            # Debugging: Output variables to console
+            Write-Host "> Computer Name: $computerName"
+            Write-Host "> Message: $message"
+    
+            # Check if the host is reachable using Test-Connection
+            if (Test-Connection -ComputerName $computerName -Count 1 -Quiet) {
+                Write-Host "> Ping successful."
+    
+                # Execute the elevated script
+                & $elevatedScript -computerName $computerName -message $message
+            } else {
+                Write-Host "> Ping failed."
+            }
+        } catch {
+            Write-Host "Error: $_"
+        }
+    })
+
+    $form.Controls.AddRange(@($HostnameLabel, $MessageLabel, $HostNameTextBox, $MessagetextBox, $SendButton, $PrefillButton, $CharCountLabel))
+    $form.ShowDialog()
+
+    Write-Host "> No Errors Encountered"
+    return
+}
+
+# Start the GUI
+Show-MainMenu

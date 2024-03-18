@@ -1,0 +1,41 @@
+# Power Messenger v1.0
+
+## Description:
+Power Messenger is a PowerShell script designed to facilitate remote communication by sending messages to other computers on a network
+using the "msg" command via WMI (Windows Management Instrumentation). The script provides a simple graphical user interface (GUI) for ease of use.
+
+## Usage Instructions:
+1. Execute the script in a PowerShell environment.
+2. The GUI window "Power Messenger" will appear.
+
+## GUI Elements:
+- **Hostname:** Textbox to enter the target computer's hostname.
+- **Message:** Multiline textbox for composing the message. A character counter displays the number of characters.
+- **Insert Fill Button:** Inserts a predefined message template into the message box.
+- **Send Button:** Sends the composed message to the specified computer.
+
+## Features:
+- **Character Limit:** The message textbox has a character limit of 255 characters. This is a WMI limitation, along with the 60 seconds auto delete timer.
+- **Prefill Button:** Click the "Insert Fill" button to insert a predefined message template into the message box.
+
+## Prefill Button Instructions:
+1. Click the "Insert Fill" button.
+2. The predefined message template will be inserted into the message box.
+3. Edit the message as needed.
+
+## Sending a Message:
+1. Enter the target computer's hostname in the "Hostname" field.
+2. Compose your message in the "Message" field.
+3. Click the "Send" button to send the message to the specified computer.
+
+## Important Notes:
+- The script utilizes the "msg" command through WMI to send messages.
+- Ensure that PowerShell is run with sufficient permissions to invoke WMI methods.
+- The script icon is associated with the "newdev.exe" file.
+
+## Acknowledgments:
+This script is provided as-is, and the user is encouraged to customize it as needed. For any issues, feedback, or inquiries, please let me know so I can 
+further improve on this script. 
+
+-Miguel Sanchez
+
