@@ -1,0 +1,41 @@
+
+"Route Tracer Ver 3.1"
+
+Route Tracer Version 3.1 stands out as an indispensable tool in network connectivity diagnosis. 
+Unlike a basic "Trace Route" command, it offers specialized features tailored for comprehensive 
+analysis within terminal environments.
+
+One of its key distinctions lies in its capability for remote operations within an intranet, 
+empowering users with elevated credentials to initiate route tests for specified Host Domain 
+names or IPs.
+
+This tool serves as my go-to solution for pinpointing latency issues across afflicted devices. 
+By conducting detailed diagnostics, it enables me to discern whether the root causes stem from 
+workstations, printers, switches, routers, and beyond.
+
+
+Instructions:
+
+	> Enter a remote host IP or a workstation name
+
+		-This will cause a query into the DNS and attempt to match the IP / Workstation name 
+		 to a Fully Quallified Domain Name (FQDN)
+
+	> Next the script will return it's findings. Either a "failed to resolve" error will appear
+	  or the FQDN and Ip address tied to the FQDN will populate.
+
+	> Afterwards, the script will ask for you to input your "Target IP"
+
+		-This will be the host device you want to test the connection with. In my case I often
+		 input a networked printer because all networked printers have to go through multiple
+		 routers and switches and my users often complain about print latency.
+
+		-This part of the script will run a small and sepperate "Ping" commandlet in the 
+		 background in order to check if the target host is even online. (To prevent having to
+		 wait for all the hops of the tracert command to complete)
+
+	> If the IP address is active and pingable the script will prompt you for the maximum amount
+	  of hops you want it cap out at. I recommend no more than 15, adjust as necesary. 
+
+	> Lastly it will show you the results of your latency test and will ask you if you would like 
+	  to continue. 

@@ -1,0 +1,182 @@
+<#
+Instructions:
+
+	> Enter a remote host IP or a workstation name
+
+		-This will cause a query into the DNS and attempt to match the IP / Workstation name 
+		 to a Fully Quallified Domain Name (FQDN)
+
+	> Next the script will return it's findings. Either a "failed to resolve" error will appear
+	  or the FQDN and Ip address tied to the FQDN will populate.
+
+	> Afterwards, the script will ask for you to input your "Target IP"
+
+		-This will be the host device you want to test the connection with. In my case I often
+		 input a networked printer because all networked printers have to go through multiple
+		 routers and switches and my users often complain about print latency.
+
+		-This part of the script will run a small and sepperate "Ping" commandlet in the 
+		 background in order to check if the target host is even online. (To prevent having to
+		 wait for all the hops of the tracert command to complete)
+
+	> If the IP address is active and pingable the script will prompt you for the maximum amount
+	  of hops you want it cap out at. I recommend no more than 15, adjust as necesary. 
+
+	> Lastly it will show you the results of your latency test and will ask you if you would like 
+	  to continue. #>
+
+# Function to resolve FQDN from IP address or hostname
+function Resolve-FQDN {
+    param (
+        [string]$HostInput
+    )
+
+    $fqdn = $null
+    $ipAddress = $null
+
+    # Loop until FQDN is resolved
+    while ($fqdn -eq $null) {
+        # Check if the input is an IP address
+        if ($HostInput -as [ipaddress]) {
+            # Input is an IP address, perform reverse DNS lookup
+            try {
+                $fqdn = [System.Net.Dns]::GetHostEntry($HostInput).HostName
+                $ipAddress = $HostInput
+            } catch {
+                Write-Host "   Failed to resolve FQDN for IP address '$HostInput'" -Foregroundcolor Red
+                Write-Host "" # Empty Line
+                $HostInput = Read-Host "Enter Host Ip or Workstation Name"
+                Write-Host "" # Empty Line
+            }
+        } else {
+            # Input is a hostname, perform forward DNS lookup
+            try {
+                $ipAddresses = [System.Net.Dns]::GetHostAddresses($HostInput)
+                if ($ipAddresses.Count -gt 0) {
+                    # Use the first IP address found for the hostname
+                    $ipAddress = $ipAddresses[0].IPAddressToString
+                    $fqdn = [System.Net.Dns]::GetHostEntry($ipAddress).HostName
+                } else {
+                    Write-Host "   No IP address found for hostname '$HostInput'" -Foregroundcolor Red
+                    Write-Host "" # Empty Line
+                    $HostInput = Read-Host "Enter Remote Host IP or Workstation Name"
+                    Write-Host "" # Empty Line
+                }
+            } catch {
+                Write-Host "   Failed to resolve IP address for hostname '$HostInput'" -Foregroundcolor Red
+                Write-Host "" # Empty Line
+                $HostInput = Read-Host "Enter Host Ip or Workstation Name"
+                 Write-Host "" # Empty Line
+            }
+        }
+    }
+
+    return $fqdn, $ipAddress
+}
+
+# Function to perform a quick ping test
+function Test-Ping {
+    param (
+        [string]$IPAddress
+    )
+
+    try {
+        $pingResult = Test-Connection -ComputerName $IPAddress -Count 1 -ErrorAction Stop
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+# Get the current user's workstation name and IP address
+$currentWorkstationName = $env:COMPUTERNAME
+$currentIPAddress = (Test-Connection -ComputerName $currentWorkstationName -Count 1).IPV4Address.IPAddressToString
+
+do {
+    # Prompt the user for the Host IP or Workstation Name
+    $remote_input = Read-Host "Enter Host IP or Workstation Name"
+                    Write-Host "" # Empty Line
+
+    if ([string]::IsNullOrWhiteSpace($remote_input)) {
+        # If the user hits enter without typing anything, use the current workstation IP
+        $remote_input = $currentIPAddress
+    } elseif ($remote_input -eq $currentWorkstationName) {
+        # If the input matches the current user's workstation name, use the current workstation IP
+        $remote_input = $currentIPAddress
+    }
+
+    # Resolve the FQDN and IP address
+    $remote_fqdn, $remote_ip = Resolve-FQDN $remote_input
+
+    # Print the resolved FQDN and IP address to the terminal
+    Write-Host "   Fully Qualified Domain Name is '" -NoNewline
+    Write-Host $remote_fqdn -ForegroundColor Yellow -NoNewline
+    Write-Host "'"
+    Write-Host "               Host Ip Address is '" -NoNewline
+    Write-Host $remote_ip -ForegroundColor Yellow -NoNewline
+    Write-Host "'" # New Line
+    Write-Host "" # Empty Line
+
+    # Check if the IP address is valid
+    while (!(Test-Ping $remote_ip)) {
+        Write-Host "   Provided IP address is invalid. Please input a valid IP address." -ForegroundColor Red
+        Write-Host "" # Empty Line
+        $remote_input = Read-Host "Enter Host IP or Workstation Name"
+        Write-Host "" # Empty Line
+        $remote_fqdn, $remote_ip = Resolve-FQDN $remote_input
+    }
+
+    # Prompt the user for the target IP address
+    $target_ip = Read-Host "Enter Target IP"
+                 Write-Host "" # Empty Line
+
+    # Check if the target IP address is valid
+    while (!(Test-Ping $target_ip)) {
+        Write-Host "   Provided target IP address is invalid. Please input a valid IP address." -ForegroundColor Red
+        Write-Host "" # Empty Line
+        $target_ip = Read-Host "Enter Target Ip"
+        Write-Host "" # Empty Line
+    }
+
+    # Prompt the user for the maximum number of hops
+    $max_hops = Read-Host "Enter Maximum Number Of Hops"
+                Write-Host "" # Empty Line
+
+    try {
+        # Check if the remote IP matches the current user's IP
+        if ($remote_ip -eq $currentIPAddress) {
+            # Execute traceroute without elevated permissions
+            Write-Host "   'From' Ip address matches current workstation." -ForegroundColor Yellow
+            Write-Host "   Executing traceroute without elevated permissions..." -ForegroundColor Yellow
+            Write-Host "" # Empty Line
+            Write-Host "   From '" -NoNewline
+                Write-Host $currentIPAddress -ForegroundColor Yellow -NoNewline
+                Write-Host "'"
+                Write-Host "     To '" -NoNewline
+                Write-Host $target_ip -ForegroundColor Yellow -NoNewline
+                Write-Host "'"
+            tracert -h $max_hops -w 30 $target_ip
+            Write-Host "" # Empty Line
+        } else {
+            # Use Invoke-Command to run tracert remotely on the specified workstation
+            Invoke-Command -ComputerName $remote_fqdn -ScriptBlock {
+                param($target_ip, $max_hops, $remote_fqdn)
+                Write-Host "   From '" -NoNewline
+                Write-Host $using:remote_fqdn -ForegroundColor Yellow -NoNewline
+                Write-Host "'"
+                Write-Host "     To '" -NoNewline
+                Write-Host $using:target_ip -ForegroundColor Yellow -NoNewline
+                Write-Host "'"
+                tracert -h $max_hops -w 30 $target_ip
+                Write-Host "" # Empty Line
+            } -ArgumentList $target_ip, $max_hops, $remote_fqdn
+        }
+    } catch {
+        Write-Host "Error: $_"
+    }
+
+    # Ask the user if they want to continue
+    $continue = Read-Host "Do you want to continue? (yes/no)"
+    Write-Host "" # Empty Line
+
+} while ($continue -eq "yes" -or $continue -eq "y" -or $continue -eq "ye")
