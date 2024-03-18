@@ -1,0 +1,22 @@
+###################
+   Printer Sniffer
+        v8.1.1
+####################
+
+Original File Output Path:
+The default output path reflects the folder in which the script is currently located. 
+You can modify the output location using the GUI.
+
+GUI Server List Editing:
+- When you start "Editing" the server list, a new text document is created in the script's current location.
+- The script references the data in this text file for ping tests during execution.
+
+Recommended Usage:
+- Create a shortcut of the script and place it on your desktop for easy access and to avoid clutter. 
+
+Script Functionality:
+- The script operates by sending a ping command to the print spooler of your selected server.
+- It subsequently pings all printer devices associated with the server and generates a report.
+- The report includes IP addresses, printer names, and their ping status.
+
+Please contact Miguel Sanchez, EUS, Integrated Print Solutions, for any bug reports or assistance. Thank you for using the Printer Sniffer Tool!

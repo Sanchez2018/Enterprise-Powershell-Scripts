@@ -1,0 +1,435 @@
+# Printer Sniffer Tool Version 8.1.1
+# Release Version 1.0
+
+# Note - This is the first release of the tool to be used to scan for printers.
+# I am still working on fixing minors bugs and increasing ease of use.
+# Please let me know if there are any bugs you encounter.
+# -Miguel Sanchez, EUS, Integrated Print Solutions, Dec 13th, 2023.
+
+
+# Function to test connection status
+function Test-ConnectionStatus {
+    param (
+        [string]$ip
+    )
+    $result = Test-Connection -ComputerName $ip -Count 2 -Quiet
+    return $result
+}
+
+# Function to save and load server list
+function Save-ServerList {
+    param (
+        [string]$filePath,
+        [string[]]$serverList
+    )
+    $serverList | Out-File -FilePath $filePath
+}
+
+function Load-ServerList {
+    param (
+        [string]$filePath
+    )
+    if (Test-Path $filePath) {
+        Get-Content $filePath
+    } else {
+        @()
+    }
+}
+
+# Global variables to store form and combo box references
+$global:form = $null
+$global:comboBox = $null
+
+#GUI function
+function Show-PrinterSnifferForm {
+    Add-Type -AssemblyName System.Windows.Forms
+
+    $form = New-Object Windows.Forms.Form
+    $form.Text = "Printer Sniffer"
+    $form.Width = 355
+    $form.Height = 220
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = "FixedSingle"
+    $form.SizeGripStyle = "Hide"
+
+    # Setting Script Gui Icon
+    $iconPath = Join-Path $env:SystemRoot "system32\DevicePairingWizard.exe"
+    $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($iconPath)
+    $form.Icon = $icon
+
+    # Default Output Location
+    $defaultOutputLocationFile = Join-Path $PSScriptRoot "Output Location.txt"
+    if (Test-Path $defaultOutputLocationFile) {
+        $defaultOutputLocation = Get-Content $defaultOutputLocationFile
+    } else {
+        $defaultOutputLocation = $PSScriptRoot
+    }
+
+    $outputLocation = $defaultOutputLocation
+
+    # Labels
+    $ServerSelect = New-Object Windows.Forms.Label -Property @{
+        Text = "Select a Server:"
+        Location = New-Object Drawing.Point(35, 20)
+        AutoSize = $true
+    }
+
+    $OutputSelect = New-Object Windows.Forms.Label -Property @{
+        Text = "Select output location:"
+        Location = New-Object Drawing.Point(35, 70)
+        AutoSize = $true
+    }
+
+    # Combo Box
+    $comboBox = New-Object Windows.Forms.ComboBox -Property @{
+        Location = New-Object Drawing.Point(35, 40)
+        Size = New-Object Drawing.Size(200, 20)
+    }
+
+    # Load server list from file
+    $serverListFile = "Server List.txt"
+    $comboBox.Items.AddRange((Load-ServerList -filePath $serverListFile))
+
+    # Textbox for Output Location
+    $textBox = New-Object Windows.Forms.TextBox -Property @{
+        Location = New-Object Drawing.Point(35, 90)
+        Size = New-Object Drawing.Size(200, 20)
+        Text = $OutputLocation
+    }
+
+    # Browse button
+    $buttonBrowse = New-Object Windows.Forms.Button -Property @{
+        Location = New-Object Drawing.Point(240, 90)
+        Size = New-Object Drawing.Size(70, 20)
+        Text = "Browse"
+    }
+    $buttonBrowse.Add_Click({
+        $folderBrowser = New-Object System.Windows.Forms.FolderBrowserDialog
+        $folderBrowser.SelectedPath = $outputLocation
+        $result = $folderBrowser.ShowDialog()
+
+        if ($result -eq 'OK') {
+            $outputLocation = $folderBrowser.SelectedPath
+            $textBox.Text = $outputLocation
+
+            # Update the content of the output location text file
+            $outputLocation | Set-Content -Path $defaultOutputLocationFile
+        }
+    })
+
+    # Modify Server List button
+    $buttonModifyServerList = New-Object Windows.Forms.Button -Property @{
+        Location = New-Object Drawing.Point(240, 40)
+        Size = New-Object Drawing.Size(70, 20)
+        Text = "Edit"
+    }
+    $buttonModifyServerList.Add_Click({
+        # Open a new window to modify the server list
+        Show-ModifyServerListForm
+    })
+
+    # Start Button
+    $button = New-Object Windows.Forms.Button -Property @{
+        Location = New-Object Drawing.Point(240, 130)
+        Size = New-Object Drawing.Size(70, 25)
+        Text = "OK"
+    }
+
+    # Declare $outputLocation outside the event handler
+    $outputLocation = $defaultOutputLocation
+
+
+    
+    $button.Add_Click({
+        if ($comboBox.SelectedItem) {
+            # Save the selected server to the server list file
+            $selectedServer = $comboBox.SelectedItem.ToString()
+            $serverList = Load-ServerList -filePath $serverListFile
+            if ($serverList -notcontains $selectedServer) {
+                $serverList += $selectedServer
+                Save-ServerList -filePath $serverListFile -serverList $serverList
+            }
+    
+            $outputLocation = $textBox.Text
+            $result = [Windows.Forms.MessageBox]::Show("Files Will Be Saved At $outputLocation", "Notice", [Windows.Forms.MessageBoxButtons]::OKCancel, [Windows.Forms.MessageBoxIcon]::Information)
+    
+            if ($result -eq [Windows.Forms.DialogResult]::OK) {
+                #Hide Form and disable to prevent user intervension
+                $form.Hide()
+
+                # $form.DialogResult = [Windows.Forms.DialogResult]::OK
+                Write-Host "Selected Output Location:$($outputLocation)"
+    
+                # Get printers only if a server is selected
+                $printers = Get-Printer -ComputerName $($comboBox.SelectedItem)
+                $printersToExclude = @("Fax", "Microsoft XPS Document Writer", "Microsoft Print to PDF")
+    
+                # Arrays for reachable and unreachable printers
+                $reachablePrinters = @()
+                $unreachablePrinters = @()
+    
+                # Loading screen
+                Write-Progress -Activity "Performing Tasks" -Status "Collecting printer information..." -PercentComplete 0
+    
+                # Iterate through each printer
+                foreach ($printer in $printers) {
+                    $printerName = $printer.Name
+                    
+                    # Skip excluded printers
+                    if ($printersToExclude -contains $printerName) {
+                        continue
+                    }
+
+                    # Use the printer port as the IP address
+                    $printerIP = $printer.PortName
+
+                    # Check if IP pings from the local machine
+                    $isReachable = Test-ConnectionStatus -ip $printerIP
+
+                    # Add results to appropriate arrays
+                    $pingResult = [PSCustomObject]@{
+                        PrinterName = $printerName
+                        IPAddress = $printerIP
+                        Reachable = $isReachable
+                    }
+
+                    if ($isReachable) {
+                        $reachablePrinters += $pingResult
+                    } else {
+                        $unreachablePrinters += $pingResult
+                    }
+
+                    # Loading screen updates
+                    $percentComplete = ($reachablePrinters.Count + $unreachablePrinters.Count) / $printers.Count * 100
+                    Write-Progress -Activity "Performing Tasks" -Status "Collecting printer information..." -PercentComplete $percentComplete
+                }
+    
+                # Loading screen ends
+                Write-Progress -Activity "Performing Tasks" -Status "Task complete." -Completed
+    
+                # Output results
+                if ($outputLocation -ne $null) {
+                    $reportContent = @"
+Server: $($comboBox.SelectedItem)
+Reachable Printers:
+$($reachablePrinters | Format-Table | Out-String)
+    
+Unreachable Printers:
+$($unreachablePrinters | Format-Table | Out-String)
+"@
+    
+                    # File Output
+                    $reportFilePath = Join-Path $outputLocation "Server '$($comboBox.SelectedItem)' ping report.txt"
+
+                    # Save to Notepad file
+                    $reportContent | Out-File -FilePath $reportFilePath
+    
+                    # Open the Notepad file
+                    Invoke-Item $reportFilePath
+
+                    # Display a message
+                    Write-Host "Printers ping status for $($comboBox.SelectedItem) has been saved to $reportFilePath"
+
+                    # Task Complete Box
+                    $taskCompleteForm = New-Object System.Windows.Forms.Form
+                    $taskCompleteForm.Text = "Printer Sniffer"
+                    $taskCompleteForm.Width = 260
+                    $taskCompleteForm.Height = 130
+                    $taskCompleteForm.StartPosition = "CenterScreen"
+                    $taskCompleteForm.TopMost = $true
+                    $taskCompleteform.FormBorderStyle = "FixedSingle"
+                    $taskCompleteform.SizeGripStyle = "Hide"
+                    $taskCompleteform.Icon = $icon
+
+                    $label = New-Object System.Windows.Forms.Label
+                    $label.Text = "Task complete."
+                    $label.AutoSize = $true
+                    $label.Location = New-Object System.Drawing.Point(75, 10)
+
+                    $label2 = New-Object System.Windows.Forms.Label
+                    $label2.Text = "Click 'ok' to continue."
+                    $label2.AutoSize = $true
+                    $label2.Location = New-Object System.Drawing.Point(70, 30)
+
+                    $buttonOK = New-Object System.Windows.Forms.Button
+                    $buttonOK.DialogResult = [System.Windows.Forms.DialogResult]::OK
+                    $buttonOK.Text = "OK"
+                    $buttonOK.Location = New-Object System.Drawing.Point(80, 55)
+
+                    $taskCompleteForm.Controls.Add($label)
+                    $taskCompleteForm.Controls.Add($label2)
+                    $taskCompleteForm.Controls.Add($buttonOK)
+
+                    $result = $taskCompleteForm.ShowDialog()
+
+                    # Perform actions based on the result, if needed
+
+                    # Dispose of the form when done
+                    $taskCompleteForm.Dispose()
+
+
+                    # Restore the form to normal state
+                    $form.show()
+                }
+            }
+        } else {
+            [Windows.Forms.MessageBox]::Show("Please select a server.", "Error", [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Warning)
+            # Set DialogResult to None so that the form doesn't close automatically
+            $form.DialogResult = [Windows.Forms.DialogResult]::None
+        }
+    })
+
+    # Adding controls to the form
+    $form.Controls.AddRange(@($ServerSelect, $comboBox, $OutputSelect, $textBox, $buttonBrowse, $buttonModifyServerList, $button))
+
+    # Save references to form and combo box in global variables
+    $global:form = $form
+    $global:comboBox = $comboBox
+
+    # Show the form and get the result
+    $result = $form.ShowDialog()
+
+    # Check the result and restart the script if "Save and Close" was selected
+    if ($result -eq [Windows.Forms.DialogResult]::OK) {
+        # Restart the script
+        & "$($MyInvocation.MyCommand.Path)"
+    }
+}
+
+# Function to show Modify Server List Form
+function Show-ModifyServerListForm {
+    Add-Type -AssemblyName System.Windows.Forms
+
+    $modifyForm = New-Object Windows.Forms.Form
+    $modifyForm.Text = "Modify Server List"
+    $modifyForm.Width = 300
+    $modifyForm.Height = 200
+    $modifyForm.StartPosition = "CenterScreen"
+
+    # Setting Script Gui Icon
+    $iconPath = Join-Path $env:SystemRoot "system32\Dxpserver.exe"
+    $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($iconPath)
+    $modifyForm.Icon = $icon
+
+    # Labels
+    $labelServers = New-Object Windows.Forms.Label -Property @{
+        Text = "Current Servers:                         Type Server Name:"
+        Location = New-Object Drawing.Point(10, 20)
+        AutoSize = $true
+    }
+    # Listbox for displaying current servers#
+    $listBoxServers = New-Object Windows.Forms.ListBox -Property @{
+        Location = New-Object Drawing.Point(10, 40)
+        Size = New-Object Drawing.Size(150, 100)
+        SelectionMode = "MultiExtended"
+    
+    }
+
+    # Respond to Backspace and Delete keys to remove selected servers
+    $listBoxServers.Add_KeyDown({
+     if ($_.KeyCode -eq 'Back' -or $_.KeyCode -eq 'Delete') {
+            Remove-SelectedServers
+     }
+    })
+
+    # Function to remove selected servers
+function Remove-SelectedServers {
+     foreach ($selectedItem in $listBoxServers.SelectedItems) {
+         $listBoxServers.Items.Remove($selectedItem)
+     }
+    }   
+   
+    # Load server list from file
+    $serverListFile = "Server List.txt"
+    $listBoxServers.Items.AddRange((Load-ServerList -filePath $serverListFile))
+
+    # TextBox for typing a new server
+    $textBoxNewServer = New-Object Windows.Forms.TextBox -Property @{
+        Location = New-Object Drawing.Point(170, 40)
+        Size = New-Object Drawing.Size(100, 20)
+    }
+    # Respond to Ctrl+A to select all text in the TextBox
+    $textBoxNewServer.Add_KeyDown({
+        if ($_.KeyCode -eq 'A' -and $_.Control) {
+            $textBoxNewServer.SelectAll()
+            $_.SuppressKeyPress = $true
+        }
+    })
+
+    # Button to add a new server
+    $buttonAddServer = New-Object Windows.Forms.Button -Property @{
+        Location = New-Object Drawing.Point(170, 65)
+        Size = New-Object Drawing.Size(100, 25)
+        Text = "Add Server"
+    }
+    $buttonAddServer.Add_Click({
+        $newServer = $textBoxNewServer.Text
+        if (-not [string]::IsNullOrWhiteSpace($newServer)) {
+            $listBoxServers.Items.Add($newServer)
+            $textBoxNewServer.Clear()
+        }
+    })
+
+    # Enable the button to respond to the Enter key
+    $modifyForm.KeyPreview = $true
+    $modifyForm.Add_KeyDown({
+        if ($_.KeyCode -eq "Enter") {
+            Add-ServerFunction
+        }
+    })
+
+    # Button to remove selected servers
+    $buttonRemoveServer = New-Object Windows.Forms.Button -Property @{
+        Location = New-Object Drawing.Point(170, 95)
+        Size = New-Object Drawing.Size(100, 25)
+        Text = "Remove Server"
+    }
+    $buttonRemoveServer.Add_Click({
+        foreach ($selectedItem in $listBoxServers.SelectedItems) {
+            $listBoxServers.Items.Remove($selectedItem)
+        }
+    })
+
+    # Respond to Ctrl+A to select all text in the TextBox
+    $textBoxNewServer.Add_KeyDown({
+        if ($_.KeyCode -eq 'A' -and $_.Control) {
+            $textBoxNewServer.SelectAll()
+            $_.SuppressKeyPress = $true
+        }
+    })
+
+    # Button to save and close the Modify Server List window
+    $buttonSaveClose = New-Object Windows.Forms.Button -Property @{
+        Location = New-Object Drawing.Point(170, 125)
+        Size = New-Object Drawing.Size(100, 25)
+        Text = "Save and Close"
+    }
+    $buttonSaveClose.Add_Click({
+        # Save the modified server list to the file
+        Save-ServerList -filePath $serverListFile -serverList $listBoxServers.Items
+        $modifyForm.Close()
+
+        # Update the existing main form with the updated server list
+        $global:comboBox.Items.Clear()
+        $global:comboBox.Items.AddRange((Load-ServerList -filePath $serverListFile))
+        $global:form.Activate()
+    })
+
+    # Adding controls to the Modify Server List form
+    $modifyForm.Controls.AddRange(@($labelServers, $listBoxServers, $textBoxNewServer, $buttonAddServer, $buttonRemoveServer, $buttonSaveClose))
+
+    # Show the Modify Server List form
+    $modifyForm.ShowDialog()
+}
+
+# Function to add server
+function Add-ServerFunction {
+    $newServer = $textBoxNewServer.Text
+    if (-not [string]::IsNullOrWhiteSpace($newServer)) {
+        $listBoxServers.Items.Add($newServer)
+        $textBoxNewServer.Clear()
+    }
+}
+
+# Run the main form
+Show-PrinterSnifferForm
